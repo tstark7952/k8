@@ -20,7 +20,7 @@ EOF
 apt update
 
 apt install -y kubelet kubeadm kubectl containerd.io
-apt-mark hold kubelet kubeadm kubectl containerd.io
+apt-mark hold kubelet kubeadm kubectl containerd
 
 # Load the necessary modules for Containerd:
 
