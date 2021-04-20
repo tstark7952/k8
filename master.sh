@@ -24,7 +24,7 @@ apt install -y kubelet kubeadm kubectl containerd
 # Load the necessary modules for Containerd:
 
 cat <<EOF | sudo tee /etc/modules-load.d/containerd.conf
-overlay2
+overlay
 br_netfilter
 EOF
 
