@@ -1,5 +1,6 @@
 #!/bin/sh
 
+apt update && apt upgrade -y
 
 ### setup terminal
 apt-get install -y bash-completion binutils
