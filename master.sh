@@ -32,7 +32,7 @@ EOF
 
 sudo sysctl --system
 
-sudo apt-get update && sudo apt-get install -y containerd
+sudo apt-get update && sudo apt-get install -y containerd=1.5.0
 
 sudo mkdir -p /etc/containerd
 
