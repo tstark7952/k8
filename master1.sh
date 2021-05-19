@@ -7,6 +7,11 @@ apt-get install -y bash-completion binutils
 echo 'source <(kubectl completion bash)' >> ~/.bashrc
 echo 'alias k=kubectl' >> ~/.bashrc
 
+### On all nodes, disable swap.
+
+sudo swapoff -a
+sudo sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+
 
 ### ContainerD setup and config
 
@@ -27,7 +32,7 @@ EOF
 
 sudo sysctl --system
 
-sudo apt-get update && sudo apt-get install -y containerd=1.5.0
+sudo apt-get update && sudo apt-get install -y containerd
 
 sudo mkdir -p /etc/containerd
 
@@ -55,6 +60,7 @@ sudo kubeadm init --pod-network-cidr 192.168.0.0/16
 
 ### Set up Master node
 
+sudo kubeadm init --cri-socket /run/containerd/containerd.sock
 mkdir -p $HOME/.kube
 sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
 sudo chown $(id -u):$(id -g) $HOME/.kube/config
