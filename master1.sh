@@ -55,7 +55,6 @@ sudo kubeadm init --pod-network-cidr 192.168.0.0/16
 
 ### Set up Master node
 
-sudo kubeadm init --cri-socket /run/containerd/containerd.sock
 mkdir -p $HOME/.kube
 sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
 sudo chown $(id -u):$(id -g) $HOME/.kube/config
