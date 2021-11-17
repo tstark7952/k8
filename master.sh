@@ -1,67 +1,138 @@
 #!/bin/sh
 
-apt update && apt upgrade -y
+# Source: http://kubernetes.io/docs/getting-started-guides/kubeadm
+
+KUBE_VERSION=1.22.2
+
 
 ### setup terminal
+apt-get update
 apt-get install -y bash-completion binutils
+echo 'colorscheme ron' >> ~/.vimrc
+echo 'set tabstop=2' >> ~/.vimrc
+echo 'set shiftwidth=2' >> ~/.vimrc
+echo 'set expandtab' >> ~/.vimrc
 echo 'source <(kubectl completion bash)' >> ~/.bashrc
 echo 'alias k=kubectl' >> ~/.bashrc
-
-### On all nodes, disable swap.
-
-sudo swapoff -a
-sudo sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+echo 'alias c=clear' >> ~/.bashrc
+echo 'complete -F __start_kubectl k' >> ~/.bashrc
+sed -i '1s/^/force_color_prompt=yes\n/' ~/.bashrc
 
 
-### ContainerD setup and config
+### disable linux swap and remove any existing swap partitions
+swapoff -a
+sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
 
+
+### remove packages
+kubeadm reset -f
+crictl rm --force $(crictl ps -a -q)
+apt-get remove -y docker.io containerd kubelet kubeadm kubectl kubernetes-cni
+apt-get autoremove -y
+systemctl daemon-reload
+
+
+### install packages
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
+cat <<EOF > /etc/apt/sources.list.d/kubernetes.list
+deb http://apt.kubernetes.io/ kubernetes-xenial main
+EOF
+apt-get update
+apt-get install -y docker.io containerd kubelet=${KUBE_VERSION}-00 kubeadm=${KUBE_VERSION}-00 kubectl=${KUBE_VERSION}-00 kubernetes-cni
+
+
+### containerd
 cat <<EOF | sudo tee /etc/modules-load.d/containerd.conf
 overlay
 br_netfilter
 EOF
-
 sudo modprobe overlay
-
 sudo modprobe br_netfilter
-
 cat <<EOF | sudo tee /etc/sysctl.d/99-kubernetes-cri.conf
 net.bridge.bridge-nf-call-iptables  = 1
 net.ipv4.ip_forward                 = 1
 net.bridge.bridge-nf-call-ip6tables = 1
 EOF
-
 sudo sysctl --system
-
-sudo apt-get update && sudo apt-get install -y containerd
-
 sudo mkdir -p /etc/containerd
 
-sudo containerd config default | sudo tee /etc/containerd/config.toml
 
-sudo systemctl restart containerd
+### containerd config
+cat > /etc/containerd/config.toml <<EOF
+disabled_plugins = []
+imports = []
+oom_score = 0
+plugin_dir = ""
+required_plugins = []
+root = "/var/lib/containerd"
+state = "/run/containerd"
+version = 2
 
-### install kubeadm, kubelet, and kubectl
+[plugins]
 
-sudo apt-get update && sudo apt-get install -y apt-transport-https curl
+  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes]
+    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+      base_runtime_spec = ""
+      container_annotations = []
+      pod_annotations = []
+      privileged_without_host_devices = false
+      runtime_engine = ""
+      runtime_root = ""
+      runtime_type = "io.containerd.runc.v2"
 
-curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
-
-cat <<EOF | sudo tee /etc/apt/sources.list.d/kubernetes.list
-deb https://apt.kubernetes.io/ kubernetes-xenial main
+      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+        BinaryName = ""
+        CriuImagePath = ""
+        CriuPath = ""
+        CriuWorkPath = ""
+        IoGid = 0
+        IoUid = 0
+        NoNewKeyring = false
+        NoPivotRoot = false
+        Root = ""
+        ShimCgroup = ""
+        SystemdCgroup = true
 EOF
 
-sudo apt-get update
 
-sudo apt-get install -y kubelet kubeadm kubectl
+### crictl uses containerd as default
+{
+cat <<EOF | sudo tee /etc/crictl.yaml
+runtime-endpoint: unix:///run/containerd/containerd.sock
+EOF
+}
 
-sudo kubeadm init --pod-network-cidr 192.168.0.0/16
+
+### kubelet should use containerd
+{
+cat <<EOF | sudo tee /etc/default/kubelet
+KUBELET_EXTRA_ARGS="--container-runtime remote --container-runtime-endpoint unix:///run/containerd/containerd.sock"
+EOF
+}
 
 
+### start services
+systemctl daemon-reload
+systemctl enable containerd
+systemctl restart containerd
+systemctl enable kubelet && systemctl start kubelet
 
-### Set up Master node
 
-sudo kubeadm init --cri-socket /run/containerd/containerd.sock
-mkdir -p $HOME/.kube
-sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
-sudo chown $(id -u):$(id -g) $HOME/.kube/config
-kubectl apply -f https://docs.projectcalico.org/v3.19/manifests/calico.yaml
+### init k8s
+rm /root/.kube/config
+kubeadm init --kubernetes-version=${KUBE_VERSION} --ignore-preflight-errors=NumCPU --skip-token-print
+
+mkdir -p ~/.kube
+sudo cp -i /etc/kubernetes/admin.conf ~/.kube/config
+
+# workaround because https://github.com/weaveworks/weave/issues/3927
+# kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')"
+curl -L https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n') -o weave.yaml
+sed -i 's/ghcr.io\/weaveworks\/launcher/docker.io\/weaveworks/g' weave.yaml
+kubectl -f weave.yaml apply
+rm weave.yaml
+
+
+echo
+echo "### COMMAND TO ADD A WORKER NODE ###"
+kubeadm token create --print-join-command --ttl 0
