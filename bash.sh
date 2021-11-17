@@ -1,4 +1,3 @@
-### setup terminal
 apt-get update
 apt-get install -y bash-completion binutils
 echo 'colorscheme ron' >> ~/.vimrc
