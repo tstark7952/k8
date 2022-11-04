@@ -1,10 +1,5 @@
 #!/bin/sh
 
-# Source: http://kubernetes.io/docs/getting-started-guides/kubeadm
-
-KUBE_VERSION=1.22.2
-
-
 ### setup terminal
 apt-get update
 apt-get install -y bash-completion binutils
@@ -21,15 +16,30 @@ sed -i '1s/^/force_color_prompt=yes\n/' ~/.bashrc
 
 ### disable linux swap and remove any existing swap partitions
 swapoff -a
-sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+sed -i '/\sswap\s/ s/^\(.*\)$/#\1/g' /etc/fstab
 
 
 ### remove packages
-kubeadm reset -f
-crictl rm --force $(crictl ps -a -q)
-apt-get remove -y docker.io containerd kubelet kubeadm kubectl kubernetes-cni
+kubeadm reset -f || true
+crictl rm --force $(crictl ps -a -q) || true
+apt-mark unhold kubelet kubeadm kubectl kubernetes-cni || true
+apt-get remove -y docker.io containerd kubelet kubeadm kubectl kubernetes-cni || true
 apt-get autoremove -y
 systemctl daemon-reload
+
+
+
+### install podman
+. /etc/os-release
+echo "deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/testing/xUbuntu_${VERSION_ID}/ /" | sudo tee /etc/apt/sources.list.d/devel:kubic:libcontainers:testing.list
+curl -L "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/testing/xUbuntu_${VERSION_ID}/Release.key" | sudo apt-key add -
+apt-get update -qq
+apt-get -qq -y install podman cri-tools containers-common
+rm /etc/apt/sources.list.d/devel:kubic:libcontainers:testing.list
+cat <<EOF | sudo tee /etc/containers/registries.conf
+[registries.search]
+registries = ['docker.io']
+EOF
 
 
 ### install packages
@@ -39,6 +49,7 @@ deb http://apt.kubernetes.io/ kubernetes-xenial main
 EOF
 apt-get update
 apt-get install -y docker.io containerd kubelet=${KUBE_VERSION}-00 kubeadm=${KUBE_VERSION}-00 kubectl=${KUBE_VERSION}-00 kubernetes-cni
+apt-mark hold kubelet kubeadm kubectl kubernetes-cni
 
 
 ### containerd
@@ -111,6 +122,7 @@ EOF
 }
 
 
+
 ### start services
 systemctl daemon-reload
 systemctl enable containerd
@@ -119,19 +131,23 @@ systemctl enable kubelet && systemctl start kubelet
 
 
 ### init k8s
-rm /root/.kube/config
-kubeadm init --kubernetes-version=${KUBE_VERSION} --ignore-preflight-errors=NumCPU --skip-token-print
+rm /root/.kube/config || true
+kubeadm init --kubernetes-version=${KUBE_VERSION} --ignore-preflight-errors=NumCPU --skip-token-print --pod-network-cidr 192.168.0.0/16
 
 mkdir -p ~/.kube
 sudo cp -i /etc/kubernetes/admin.conf ~/.kube/config
 
-# workaround because https://github.com/weaveworks/weave/issues/3927
-# kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')"
-curl -L https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n') -o weave.yaml
-sed -i 's/ghcr.io\/weaveworks\/launcher/docker.io\/weaveworks/g' weave.yaml
-kubectl -f weave.yaml apply
-rm weave.yaml
+### CNI
+kubectl apply -f https://raw.githubusercontent.com/killer-sh/cks-course-environment/master/cluster-setup/calico.yaml
 
+
+# etcdctl
+ETCDCTL_VERSION=v3.5.1
+ETCDCTL_VERSION_FULL=etcd-${ETCDCTL_VERSION}-linux-amd64
+wget https://github.com/etcd-io/etcd/releases/download/${ETCDCTL_VERSION}/${ETCDCTL_VERSION_FULL}.tar.gz
+tar xzf ${ETCDCTL_VERSION_FULL}.tar.gz
+mv ${ETCDCTL_VERSION_FULL}/etcdctl /usr/bin/
+rm -rf ${ETCDCTL_VERSION_FULL} ${ETCDCTL_VERSION_FULL}.tar.gz
 
 echo
 echo "### COMMAND TO ADD A WORKER NODE ###"
